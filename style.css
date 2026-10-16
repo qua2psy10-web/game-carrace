@@ -389,10 +389,12 @@ body, html {
 .modal-card {
   width: 92%;
   max-width: 520px;
+  max-height: 92vh;
+  overflow-y: auto;
   background: linear-gradient(160deg, rgba(20, 27, 45, 0.95), rgba(12, 16, 28, 0.98));
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 18px;
-  padding: 32px;
+  padding: 26px 30px;
   text-align: center;
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8);
 }
@@ -407,15 +409,15 @@ body, html {
   letter-spacing: 2px;
   padding: 4px 12px;
   border-radius: 99px;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
 .game-title {
-  font-size: 40px;
+  font-size: 38px;
   font-weight: 900;
   font-style: italic;
   letter-spacing: 1px;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 
 .game-title span {
@@ -425,11 +427,11 @@ body, html {
 .subtitle {
   font-size: 13px;
   color: #94a3b8;
-  margin-bottom: 22px;
+  margin-bottom: 18px;
 }
 
 .difficulty-select {
-  margin-bottom: 20px;
+  margin-bottom: 16px;
 }
 
 .section-label {
@@ -452,7 +454,7 @@ body, html {
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.15);
   color: #cbd5e1;
-  padding: 9px 0;
+  padding: 8px 0;
   border-radius: 8px;
   font-size: 13px;
   font-weight: 800;
@@ -471,11 +473,11 @@ body, html {
   background: rgba(0, 0, 0, 0.35);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 12px;
-  padding: 14px 18px;
-  margin-bottom: 24px;
+  padding: 12px 16px;
+  margin-bottom: 4px;
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px 14px;
+  gap: 8px 14px;
   text-align: left;
 }
 
@@ -502,6 +504,7 @@ kbd {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  margin-bottom: 18px;
 }
 
 .primary-btn {
@@ -514,7 +517,7 @@ kbd {
   font-size: 17px;
   font-weight: 900;
   font-style: italic;
-  letter-spacing: 2px;
+  letter-spacing: 1.5px;
   cursor: pointer;
   box-shadow: 0 8px 25px rgba(225, 29, 72, 0.45);
   transition: transform 0.15s ease, box-shadow 0.15s ease;
@@ -527,23 +530,30 @@ kbd {
 
 .secondary-btn {
   width: 100%;
-  background: linear-gradient(135deg, rgba(14, 165, 233, 0.22), rgba(37, 99, 235, 0.32));
-  border: 1px solid #38bdf8;
-  color: #e0f2fe;
-  padding: 12px 0;
+  background: linear-gradient(135deg, #0284c7, #2563eb);
+  border: 2px solid #38bdf8;
+  color: #ffffff;
+  padding: 13px 0;
   border-radius: 10px;
-  font-size: 15px;
-  font-weight: 800;
+  font-size: 16px;
+  font-weight: 900;
   letter-spacing: 1px;
   cursor: pointer;
+  box-shadow: 0 6px 20px rgba(14, 165, 233, 0.4);
   transition: all 0.15s ease;
 }
 
 .secondary-btn:hover {
-  background: linear-gradient(135deg, rgba(14, 165, 233, 0.4), rgba(37, 99, 235, 0.5));
+  background: linear-gradient(135deg, #0ea5e9, #3b82f6);
   color: #ffffff;
-  transform: translateY(-1px);
-  box-shadow: 0 6px 20px rgba(56, 189, 248, 0.35);
+  transform: translateY(-2px);
+  box-shadow: 0 10px 26px rgba(56, 189, 248, 0.6);
+}
+
+.demo-highlight-btn {
+  background: rgba(14, 165, 233, 0.28) !important;
+  border-color: #38bdf8 !important;
+  color: #ffffff !important;
 }
 
 /* Demo Spectator Control Bar */

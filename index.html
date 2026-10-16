@@ -4,7 +4,10 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>APEX CIRCUIT 3D - First Person Racing</title>
-  <link rel="stylesheet" href="style.css" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
+  <link rel="stylesheet" href="style.css?v=3" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
 <body>
@@ -40,8 +43,8 @@
       </div>
 
       <div class="hud-controls-top">
-        <button id="btn-demo-toggle" class="hud-btn" title="AIデモ自動運転の切替 (Pキー)">
-          🤖 デモ走行: <span id="demo-mode-text">OFF</span> [P]
+        <button id="btn-demo-toggle" class="hud-btn demo-highlight-btn" title="AIデモ自動運転の切替 (D / Pキー)">
+          🎬 デモ走行: <span id="demo-mode-text">OFF</span> [D]
         </button>
         <button id="btn-camera" class="hud-btn" title="視点切替 (Vキー)">
           🎥 視点: <span id="camera-mode-text">コックピット (1人称)</span> [V]
@@ -76,7 +79,7 @@
         <button id="btn-auto-cam" class="demo-sub-btn active" title="カメラ自動スイッチ (Cキー)">
           🔄 自動カメラ切替: <span id="auto-cam-status">ON</span> [C]
         </button>
-        <button id="btn-takeover" class="demo-takeover-btn" title="この状態から自分で運転する (Pキー)">
+        <button id="btn-takeover" class="demo-takeover-btn" title="この状態から自分で運転する (D / Pキー)">
           🎮 自分で運転する
         </button>
       </div>
@@ -127,6 +130,12 @@
         <h1 class="game-title">APEX CIRCUIT <span>3D</span></h1>
         <p class="subtitle">コックピット視点・バックミラー・リアルエンジンサウンド・デモ観戦搭載</p>
 
+        <!-- Primary Action Buttons Placed Prominently Above & Below -->
+        <div class="start-btn-group">
+          <button id="btn-start-race" class="primary-btn">🏎️ RACE START (自分で走る)</button>
+          <button id="btn-start-demo" class="secondary-btn">🎬 デモ走行を見る (AUTO DEMO)</button>
+        </div>
+
         <div class="difficulty-select">
           <span class="section-label">AI ライバル難易度</span>
           <div class="diff-buttons">
@@ -142,12 +151,7 @@
           <div class="control-item"><kbd>A</kbd><kbd>D</kbd> / <kbd>←</kbd><kbd>→</kbd><span>ステアリング</span></div>
           <div class="control-item"><kbd>Space</kbd><span>ハンドブレーキ (ドリフト)</span></div>
           <div class="control-item"><kbd>V</kbd><span>1人称 / TV中継 / 3人称切替</span></div>
-          <div class="control-item"><kbd>P</kbd> / <kbd>Tab</kbd><span>デモ切替 / 観戦車切替</span></div>
-        </div>
-
-        <div class="start-btn-group">
-          <button id="btn-start-race" class="primary-btn">🏎️ RACE START</button>
-          <button id="btn-start-demo" class="secondary-btn">🎬 デモ走行を観戦 (DEMO)</button>
+          <div class="control-item"><kbd>D</kbd> / <kbd>Tab</kbd><span>デモ走行 / 観戦車切替</span></div>
         </div>
       </div>
     </div>
@@ -172,16 +176,16 @@
         </div>
 
         <div class="start-btn-group">
-          <button id="btn-retry-race" class="primary-btn">もう一度走る</button>
-          <button id="btn-result-demo" class="secondary-btn">🎬 デモ走行を観戦</button>
+          <button id="btn-retry-race" class="primary-btn">🏎️ もう一度走る</button>
+          <button id="btn-result-demo" class="secondary-btn">🎬 デモ走行を見る</button>
         </div>
       </div>
     </div>
   </div>
 
-  <script src="audio.js"></script>
-  <script src="track.js"></script>
-  <script src="car.js"></script>
-  <script src="main.js"></script>
+  <script src="audio.js?v=3"></script>
+  <script src="track.js?v=3"></script>
+  <script src="car.js?v=3"></script>
+  <script src="main.js?v=3"></script>
 </body>
 </html>
