@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>APEX CIRCUIT 3D - First Person Racing</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+  <div id="game-container">
+    <canvas id="game-canvas"></canvas>
+
+    <!-- Rear-view mirror frame overlay (synced with viewport rendering in 1st/3rd person) -->
+    <div id="mirror-frame">
+      <div class="mirror-label">REAR VIEW</div>
+    </div>
+
+    <!-- Top HUD -->
+    <div id="hud-top" class="hud-hidden">
+      <div class="hud-box pos-box">
+        <span class="hud-label">POSITION</span>
+        <div class="pos-value"><span id="hud-pos">1</span><small>/6</small></div>
+      </div>
+
+      <div class="hud-box lap-box">
+        <span class="hud-label">LAP</span>
+        <div class="lap-value"><span id="hud-lap">1</span><small>/3</small></div>
+      </div>
+
+      <div class="hud-box time-box">
+        <div class="time-row">
+          <span class="hud-label">TIME</span>
+          <span id="hud-current-time" class="time-val">00:00.000</span>
+        </div>
+        <div class="time-row best">
+          <span class="hud-label">BEST</span>
+          <span id="hud-best-time" class="time-val">--:--.---</span>
+        </div>
+      </div>
+
+      <div class="hud-controls-top">
+        <button id="btn-camera" class="hud-btn" title="視点切替 (Vキー)">
+          🎥 視点: <span id="camera-mode-text">コックピット (1人称)</span> [V]
+        </button>
+        <button id="btn-sound" class="hud-btn" title="サウンド切替 (Mキー)">
+          🔊 音: ON [M]
+        </button>
+        <button id="btn-restart" class="hud-btn" title="リスタート (Rキー)">
+          🔄 リスタート [R]
+        </button>
+      </div>
+    </div>
+
+    <!-- Minimap (Bottom Left) -->
+    <div id="minimap-container" class="hud-hidden">
+      <canvas id="minimap-canvas" width="180" height="180"></canvas>
+    </div>
+
+    <!-- Bottom Right Speed / Tachometer HUD -->
+    <div id="hud-bottom-right" class="hud-hidden">
+      <div class="rpm-bar-container">
+        <div id="hud-rpm-bar"></div>
+      </div>
+      <div class="speed-cluster">
+        <div class="gear-display" id="hud-gear">N</div>
+        <div class="speed-display">
+          <span id="hud-speed">0</span>
+          <small>km/h</small>
+        </div>
+      </div>
+      <div id="offroad-warning" class="warning-badge hidden">OFF TRACK</div>
+    </div>
+
+    <!-- Signal Lights / Countdown -->
+    <div id="signal-container" class="hidden">
+      <div class="signal-lights">
+        <div class="signal-lamp" id="lamp-1"></div>
+        <div class="signal-lamp" id="lamp-2"></div>
+        <div class="signal-lamp" id="lamp-3"></div>
+        <div class="signal-lamp" id="lamp-4"></div>
+        <div class="signal-lamp" id="lamp-5"></div>
+      </div>
+      <div id="countdown-text">READY</div>
+    </div>
+
+    <!-- Lap Notification Banner -->
+    <div id="lap-banner" class="hidden">
+      <div id="lap-banner-title">LAP 2</div>
+      <div id="lap-banner-time">00:45.120</div>
+    </div>
+
+    <!-- Start / Title Screen -->
+    <div id="start-screen" class="overlay-screen">
+      <div class="modal-card">
+        <div class="badge-3d">3D FIRST-PERSON CIRCUIT RACING</div>
+        <h1 class="game-title">APEX CIRCUIT <span>3D</span></h1>
+        <p class="subtitle">コックピット視点・バックミラー・リアルエンジンサウンド搭載</p>
+
+        <div class="difficulty-select">
+          <span class="section-label">AI ライバル難易度</span>
+          <div class="diff-buttons">
+            <button class="diff-btn" data-diff="easy">EASY</button>
+            <button class="diff-btn active" data-diff="normal">NORMAL</button>
+            <button class="diff-btn" data-diff="pro">PRO</button>
+          </div>
+        </div>
+
+        <div class="controls-guide">
+          <div class="control-item"><kbd>W</kbd> / <kbd>↑</kbd><span>アクセル</span></div>
+          <div class="control-item"><kbd>S</kbd> / <kbd>↓</kbd><span>ブレーキ / バック</span></div>
+          <div class="control-item"><kbd>A</kbd><kbd>D</kbd> / <kbd>←</kbd><kbd>→</kbd><span>ステアリング</span></div>
+          <div class="control-item"><kbd>Space</kbd><span>ハンドブレーキ (ドリフト)</span></div>
+          <div class="control-item"><kbd>V</kbd><span>一人称 / 三人称 視点切替</span></div>
+          <div class="control-item"><kbd>R</kbd><span>レースやり直し</span></div>
+        </div>
+
+        <button id="btn-start-race" class="primary-btn">RACE START</button>
+      </div>
+    </div>
+
+    <!-- Finish / Result Screen -->
+    <div id="result-screen" class="overlay-screen hidden">
+      <div class="modal-card">
+        <div class="badge-3d">CHECKERED FLAG</div>
+        <h2 class="result-title">RACE FINISHED!</h2>
+        <div class="result-rank" id="result-rank-text">1st PLACE 🏆</div>
+
+        <div class="result-stats">
+          <div class="stat-row">
+            <span>TOTAL TIME</span>
+            <strong id="result-total-time">02:15.432</strong>
+          </div>
+          <div class="stat-row">
+            <span>BEST LAP</span>
+            <strong id="result-best-lap">00:43.810</strong>
+          </div>
+          <div id="result-lap-list" class="lap-list"></div>
+        </div>
+
+        <button id="btn-retry-race" class="primary-btn">もう一度走る</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="audio.js"></script>
+  <script src="track.js"></script>
+  <script src="car.js"></script>
+  <script src="main.js"></script>
+</body>
+</html>
