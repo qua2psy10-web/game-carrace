@@ -52,9 +52,8 @@ class RaceCar {
     this.brakeLightMaterials = [];
 
     this._buildExteriorModel();
-    if (this.isPlayer) {
-      this._buildCockpitInterior();
-    }
+    this._buildCockpitInterior();
+    this.setCameraMode(false);
   }
 
   _buildExteriorModel() {
@@ -312,7 +311,6 @@ class RaceCar {
   }
 
   setCameraMode(isFirstPerson) {
-    if (!this.isPlayer) return;
     if (this.cockpitGroup) {
       this.cockpitGroup.visible = isFirstPerson;
     }
@@ -559,7 +557,11 @@ class RaceCar {
 
   updateAIPhysics(dt, track, allCars, canMove) {
     if (!canMove) {
+      this.rpm = 0.22 + Math.sin(performance.now() * 0.01 + this.carIndex) * 0.08;
       this._syncVisuals(dt, 0);
+      if (this.cockpitGroup && this.cockpitGroup.visible) {
+        this.updateDashboardCanvas();
+      }
       return;
     }
 
@@ -605,21 +607,64 @@ class RaceCar {
     while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
     while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
 
-    this.steerAngle = Math.max(-0.55, Math.min(0.55, angleDiff * 1.8));
-    this.heading += this.steerAngle * 3.2 * dt;
+    const targetSteer = Math.max(-0.55, Math.min(0.55, angleDiff * 1.9));
+    this.steerAngle += (targetSteer - this.steerAngle) * Math.min(1, dt * 9);
+    const turnRate = this.steerAngle * 3.1;
+    this.heading += turnRate * dt;
 
+    let longitudinalAccel = 0;
+    let braking = false;
     if (this.speed < desiredSpeed) {
-      this.speed += this.accelRate * 0.9 * dt;
+      longitudinalAccel = this.accelRate * 0.92;
     } else {
-      this.speed -= this.brakeRate * 0.65 * dt;
+      longitudinalAccel = -this.brakeRate * 0.65;
+      braking = this.speed - desiredSpeed > 2.5;
     }
+
+    this.speed += longitudinalAccel * dt;
+    this.speed = Math.max(0, Math.min(this.maxSpeed, this.speed));
 
     this.position.x += Math.sin(this.heading) * this.speed * dt;
     this.position.z += Math.cos(this.heading) * this.speed * dt;
 
     const updatedInfo = track.getClosestTrackInfo(this.position);
+    const halfRoad = track.roadWidth * 0.5;
+    const onCurb = updatedInfo.distance >= halfRoad - 0.6 && updatedInfo.distance <= halfRoad + track.curbWidth + 0.5;
+    this.isOffTrack = updatedInfo.distance > halfRoad + track.curbWidth;
+
+    // Compute Automatic 6-Speed Gear & RPM for AI / Demo Car
+    const speedRatio = Math.min(1, Math.abs(this.speed) / this.maxSpeed);
+    const gearThresholds = [0, 0.16, 0.32, 0.50, 0.68, 0.85, 1.05];
+    let g = 1;
+    for (let i = 1; i <= 6; i++) {
+      if (speedRatio >= gearThresholds[i - 1]) g = i;
+    }
+    this.gear = g;
+    const low = gearThresholds[g - 1];
+    const high = gearThresholds[g];
+    const gearProgress = (speedRatio - low) / (high - low);
+    this.rpm = Math.max(0.18, Math.min(0.98, 0.28 + gearProgress * 0.7));
+
+    // Skid & Curb intensities
+    const hardCornering = Math.abs(this.steerAngle) * speedRatio;
+    this.skidIntensity = hardCornering > 0.34 ? (hardCornering - 0.34) * 2.2 : 0;
+    this.curbIntensity = onCurb ? Math.min(1, speedRatio * 1.2) : 0;
+
+    // Brake lights
+    const brakeColor = braking ? 0xff1111 : 0x550000;
+    this.brakeLightMaterials.forEach((m) => m.color.setHex(brakeColor));
+
+    // Suspension pitch & roll
+    const targetPitch = -longitudinalAccel * 0.0016;
+    const targetRoll = -turnRate * speedRatio * 0.04;
+    this.pitchAngle += (targetPitch - this.pitchAngle) * Math.min(1, dt * 10);
+    this.rollAngle += (targetRoll - this.rollAngle) * Math.min(1, dt * 10);
+
     this._updateRaceProgress(updatedInfo.lapProgress);
-    this._syncVisuals(dt, this.steerAngle);
+    this._syncVisuals(dt, turnRate);
+    if (this.cockpitGroup && this.cockpitGroup.visible) {
+      this.updateDashboardCanvas();
+    }
   }
 
   _updateRaceProgress(currentLapProgress) {

@@ -1,4 +1,4 @@
-// Main Game Controller: Scene, Cameras (1st/3rd Person + Rear-View Mirror), Race Loop & UI
+// Main Game Controller: Scene, Cameras (1st/3rd Person + TV Broadcast + Orbit + Rear-View Mirror), Demo Mode & Race Loop
 (function () {
   const TOTAL_LAPS = 3;
 
@@ -20,10 +20,24 @@
   const hudSpeed = document.getElementById('hud-speed');
   const offroadWarning = document.getElementById('offroad-warning');
 
+  const btnDemoToggle = document.getElementById('btn-demo-toggle');
+  const demoModeText = document.getElementById('demo-mode-text');
   const btnCamera = document.getElementById('btn-camera');
   const cameraModeText = document.getElementById('camera-mode-text');
   const btnSound = document.getElementById('btn-sound');
   const btnRestart = document.getElementById('btn-restart');
+  const btnHome = document.getElementById('btn-home');
+
+  // Demo Spectator Bar Elements
+  const demoControlBar = document.getElementById('demo-control-bar');
+  const btnPrevCar = document.getElementById('btn-prev-car');
+  const btnNextCar = document.getElementById('btn-next-car');
+  const demoTargetCarEl = document.getElementById('demo-target-car');
+  const btnDemoCam = document.getElementById('btn-demo-cam');
+  const demoCamLabel = document.getElementById('demo-cam-label');
+  const btnAutoCam = document.getElementById('btn-auto-cam');
+  const autoCamStatus = document.getElementById('auto-cam-status');
+  const btnTakeover = document.getElementById('btn-takeover');
 
   const signalContainer = document.getElementById('signal-container');
   const countdownText = document.getElementById('countdown-text');
@@ -42,7 +56,9 @@
   const startScreen = document.getElementById('start-screen');
   const resultScreen = document.getElementById('result-screen');
   const btnStartRace = document.getElementById('btn-start-race');
+  const btnStartDemo = document.getElementById('btn-start-demo');
   const btnRetryRace = document.getElementById('btn-retry-race');
+  const btnResultDemo = document.getElementById('btn-result-demo');
   const diffButtons = document.querySelectorAll('.diff-btn');
 
   // Renderer & Scene
@@ -87,13 +103,29 @@
   // Build Track
   const track = new CircuitTrack(scene);
 
-  // Build Cars (5 AI Rivals + 1 Player starting at P6 for exciting overtaking)
+  // Build Trackside TV Broadcast Camera Positions around the circuit
+  const tvCameraStations = [];
+  const numStations = 12;
+  for (let i = 0; i < numStations; i++) {
+    const t = i / numStations;
+    const pt = track.curve.getPointAt(t);
+    const tan = track.curve.getTangentAt(t).normalize();
+    const norm = new THREE.Vector3().crossVectors(tan, new THREE.Vector3(0, 1, 0)).normalize();
+    const side = i % 2 === 0 ? 1 : -1;
+    const camPos = pt
+      .clone()
+      .addScaledVector(norm, side * (track.roadWidth * 0.5 + 8))
+      .add(new THREE.Vector3(0, 3.8 + (i % 3) * 1.6, 0));
+    tvCameraStations.push(camPos);
+  }
+
+  // Build Cars (5 AI Rivals + 1 Player starting at P6)
   const rivalConfigs = [
-    { name: 'Vortex', color: 0x0ea5e9, accentColor: 0xffffff, baseSkill: 0.94 },
-    { name: 'Solaris', color: 0xf59e0b, accentColor: 0x111827, baseSkill: 0.91 },
-    { name: 'Venom', color: 0x10b981, accentColor: 0xffffff, baseSkill: 0.88 },
-    { name: 'Phantom', color: 0x8b5cf6, accentColor: 0xfacc15, baseSkill: 0.85 },
-    { name: 'Titan', color: 0xec4899, accentColor: 0xffffff, baseSkill: 0.82 }
+    { name: 'Vortex (Blue)', color: 0x0ea5e9, accentColor: 0xffffff, baseSkill: 0.94 },
+    { name: 'Solaris (Gold)', color: 0xf59e0b, accentColor: 0x111827, baseSkill: 0.91 },
+    { name: 'Venom (Green)', color: 0x10b981, accentColor: 0xffffff, baseSkill: 0.88 },
+    { name: 'Phantom (Purple)', color: 0x8b5cf6, accentColor: 0xfacc15, baseSkill: 0.85 },
+    { name: 'Titan (Pink)', color: 0xec4899, accentColor: 0xffffff, baseSkill: 0.82 }
   ];
 
   const allCars = [];
@@ -116,18 +148,31 @@
 
   const playerCar = new RaceCar(scene, {
     isPlayer: true,
-    name: 'YOU',
+    name: 'YOU (Red)',
     color: 0xe11d48,
     accentColor: 0xffffff,
     carIndex: 5,
     maxSpeed: 79,
-    accelRate: 30
+    accelRate: 30,
+    aiSkill: 0.98
   });
   allCars.push(playerCar);
 
-  // Game State
+  // Camera Modes List
+  const CAMERA_MODES = [
+    { id: 'cockpit', label: 'コックピット (1人称)' },
+    { id: 'tv', label: 'TV中継カメラ' },
+    { id: 'chase', label: 'チェイス (3人称)' },
+    { id: 'orbit', label: 'シネマティック' }
+  ];
+
+  // Game & Demo State
   let gameState = 'TITLE'; // TITLE | COUNTDOWN | RACING | FINISHED
-  let cameraMode = 'cockpit'; // 'cockpit' (1st person) | 'chase' (3rd person)
+  let isDemoMode = false;
+  let cameraModeIndex = 0; // 0: cockpit, 1: tv, 2: chase, 3: orbit
+  let autoCameraSwitch = true;
+  let autoCamTimer = 0;
+  let spectateCarIndex = 5; // Default to playerCar (index 5 in allCars)
   let difficulty = 'normal';
   let countdownTimer = 0;
   let lastBeepStep = -1;
@@ -148,6 +193,49 @@
     space: false
   };
 
+  function getActiveCar() {
+    return isDemoMode ? allCars[spectateCarIndex] : playerCar;
+  }
+
+  function getCameraModeId() {
+    return CAMERA_MODES[cameraModeIndex].id;
+  }
+
+  function syncCarCockpitVisibility() {
+    const activeCar = getActiveCar();
+    const isCockpit = gameState !== 'TITLE' && getCameraModeId() === 'cockpit';
+    allCars.forEach((car) => {
+      car.setCameraMode(isCockpit && car === activeCar);
+      if (isCockpit && car === activeCar) {
+        car.updateDashboardCanvas();
+      }
+    });
+  }
+
+  function updateCameraUI() {
+    const modeObj = CAMERA_MODES[cameraModeIndex];
+    cameraModeText.textContent = modeObj.label;
+    demoCamLabel.textContent = modeObj.label;
+    syncCarCockpitVisibility();
+  }
+
+  function updateDemoUI() {
+    demoModeText.textContent = isDemoMode ? 'ON' : 'OFF';
+    if (isDemoMode && (gameState === 'RACING' || gameState === 'COUNTDOWN')) {
+      demoControlBar.classList.remove('hidden');
+      btnDemoToggle.style.borderColor = '#38bdf8';
+    } else {
+      demoControlBar.classList.add('hidden');
+      btnDemoToggle.style.borderColor = '';
+    }
+
+    const activeCar = getActiveCar();
+    demoTargetCarEl.textContent = `🏎️ ${activeCar.name}`;
+    autoCamStatus.textContent = autoCameraSwitch ? 'ON' : 'OFF';
+    btnAutoCam.classList.toggle('active', autoCameraSwitch);
+    updateCameraUI();
+  }
+
   window.addEventListener('keydown', (e) => {
     const code = e.code;
     if (code === 'KeyW' || code === 'ArrowUp') input.up = true;
@@ -157,11 +245,19 @@
     if (code === 'Space') input.space = true;
 
     if (code === 'KeyV') {
-      toggleCameraMode();
+      cycleCameraMode(true);
+    } else if (code === 'KeyC' && isDemoMode) {
+      toggleAutoCam();
+    } else if (code === 'KeyP' && (gameState === 'RACING' || gameState === 'COUNTDOWN')) {
+      toggleDemoMode();
+    } else if (code === 'Tab' && isDemoMode) {
+      e.preventDefault();
+      switchSpectateCar(1);
     } else if (code === 'KeyM') {
       toggleMute();
     } else if (code === 'KeyR' && (gameState === 'RACING' || gameState === 'FINISHED')) {
-      startRace();
+      if (isDemoMode) startDemoRun();
+      else startRace();
     }
   });
 
@@ -183,9 +279,41 @@
     });
   });
 
+  btnDemoToggle.addEventListener('click', () => {
+    toggleDemoMode();
+    btnDemoToggle.blur();
+  });
+
   btnCamera.addEventListener('click', () => {
-    toggleCameraMode();
+    cycleCameraMode(true);
     btnCamera.blur();
+  });
+
+  btnDemoCam.addEventListener('click', () => {
+    cycleCameraMode(true);
+    btnDemoCam.blur();
+  });
+
+  btnAutoCam.addEventListener('click', () => {
+    toggleAutoCam();
+    btnAutoCam.blur();
+  });
+
+  btnPrevCar.addEventListener('click', () => {
+    switchSpectateCar(-1);
+    btnPrevCar.blur();
+  });
+
+  btnNextCar.addEventListener('click', () => {
+    switchSpectateCar(1);
+    btnNextCar.blur();
+  });
+
+  btnTakeover.addEventListener('click', () => {
+    if (isDemoMode) {
+      toggleDemoMode(); // Switches to manual control of playerCar
+    }
+    btnTakeover.blur();
   });
 
   btnSound.addEventListener('click', () => {
@@ -194,8 +322,14 @@
   });
 
   btnRestart.addEventListener('click', () => {
-    startRace();
+    if (isDemoMode) startDemoRun();
+    else startRace();
     btnRestart.blur();
+  });
+
+  btnHome.addEventListener('click', () => {
+    returnToTitle();
+    btnHome.blur();
   });
 
   btnStartRace.addEventListener('click', () => {
@@ -203,14 +337,50 @@
     startRace();
   });
 
+  btnStartDemo.addEventListener('click', () => {
+    window.soundEngine.init();
+    startDemoRun();
+  });
+
   btnRetryRace.addEventListener('click', () => {
     startRace();
   });
 
-  function toggleCameraMode() {
-    cameraMode = cameraMode === 'cockpit' ? 'chase' : 'cockpit';
-    playerCar.setCameraMode(cameraMode === 'cockpit');
-    cameraModeText.textContent = cameraMode === 'cockpit' ? 'コックピット (1人称)' : 'チェイス (3人称)';
+  btnResultDemo.addEventListener('click', () => {
+    window.soundEngine.init();
+    startDemoRun();
+  });
+
+  function cycleCameraMode(manual = false) {
+    cameraModeIndex = (cameraModeIndex + 1) % CAMERA_MODES.length;
+    if (manual) {
+      autoCamTimer = 0;
+    }
+    updateCameraUI();
+  }
+
+  function toggleAutoCam() {
+    autoCameraSwitch = !autoCameraSwitch;
+    autoCamTimer = 0;
+    updateDemoUI();
+  }
+
+  function switchSpectateCar(dir) {
+    spectateCarIndex = (spectateCarIndex + dir + allCars.length) % allCars.length;
+    chaseInitialized = false;
+    updateDemoUI();
+  }
+
+  function toggleDemoMode() {
+    isDemoMode = !isDemoMode;
+    if (!isDemoMode) {
+      // Returning to manual control: focus playerCar and use Cockpit or Chase view
+      spectateCarIndex = 5;
+      if (cameraModeIndex > 2) cameraModeIndex = 0;
+    } else {
+      autoCamTimer = 0;
+    }
+    updateDemoUI();
   }
 
   function toggleMute() {
@@ -249,22 +419,43 @@
 
       const info = track.getClosestTrackInfo(car.position);
       car.lastLapProgress = info.lapProgress;
-      car.totalProgress = info.lapProgress - 1.0; // Slightly before start line
+      car.totalProgress = info.lapProgress - 1.0;
       car.finished = false;
 
       if (!car.isPlayer) {
         const baseCfg = rivalConfigs[idx];
         car.aiSkill = baseCfg.baseSkill * diffMult;
+      } else {
+        car.aiSkill = 1.02; // Fast and clean line when in Demo Mode
       }
 
       car._syncVisuals(0.016, 0);
     });
 
-    playerCar.setCameraMode(cameraMode === 'cockpit');
-    playerCar.updateDashboardCanvas();
+    syncCarCockpitVisibility();
+  }
+
+  function returnToTitle() {
+    window.soundEngine.stopContinuous();
+    gameState = 'TITLE';
+    isDemoMode = false;
+    signalContainer.classList.add('hidden');
+    resultScreen.classList.add('hidden');
+    hudTop.classList.add('hud-hidden');
+    minimapContainer.classList.add('hud-hidden');
+    hudBottomRight.classList.add('hud-hidden');
+    demoControlBar.classList.add('hidden');
+    startScreen.classList.remove('hidden');
+    syncCarCockpitVisibility();
   }
 
   function startRace() {
+    isDemoMode = false;
+    spectateCarIndex = 5;
+    if (cameraModeIndex === 1 || cameraModeIndex === 3) {
+      cameraModeIndex = 0; // Start in 1st-person cockpit by default
+    }
+
     startScreen.classList.add('hidden');
     resultScreen.classList.add('hidden');
     hudTop.classList.remove('hud-hidden');
@@ -272,6 +463,7 @@
     hudBottomRight.classList.remove('hud-hidden');
 
     resetCarsToGrid();
+    updateDemoUI();
 
     gameState = 'COUNTDOWN';
     countdownTimer = 0;
@@ -293,6 +485,40 @@
     signalContainer.classList.remove('hidden');
   }
 
+  function startDemoRun() {
+    isDemoMode = true;
+    spectateCarIndex = 5; // Start watching player's red car
+    cameraModeIndex = 0;  // Start in 1st-person cockpit view
+    autoCamTimer = 0;
+
+    startScreen.classList.add('hidden');
+    resultScreen.classList.add('hidden');
+    signalContainer.classList.add('hidden');
+    hudTop.classList.remove('hud-hidden');
+    minimapContainer.classList.remove('hud-hidden');
+    hudBottomRight.classList.remove('hud-hidden');
+
+    resetCarsToGrid();
+    // Give cars a rolling start in Demo Mode so action begins immediately!
+    allCars.forEach((car, idx) => {
+      car.speed = 32 + idx * 1.5;
+    });
+
+    gameState = 'RACING';
+    totalRaceTime = 0;
+    currentLapStartTime = 0;
+    bestLapTime = Infinity;
+    lapTimes = [];
+    recordedCompletedLaps = 0;
+
+    hudBestTime.textContent = '--:--.---';
+    hudCurrentTime.textContent = '00:00.000';
+    hudLap.textContent = '1';
+
+    updateDemoUI();
+    showLapBanner('🎬 DEMO RUN', 'AI AUTO-DRIVE');
+  }
+
   function showLapBanner(title, timeStr) {
     lapBannerTitle.textContent = title;
     lapBannerTime.textContent = timeStr;
@@ -306,6 +532,7 @@
     gameState = 'FINISHED';
     window.soundEngine.playFinishFanfare();
     window.soundEngine.stopContinuous();
+    demoControlBar.classList.add('hidden');
 
     const suffixes = ['st', 'nd', 'rd', 'th', 'th', 'th'];
     const rankStr = `${rank}${suffixes[rank - 1] || 'th'} PLACE ${rank === 1 ? '🏆' : ''}`;
@@ -344,12 +571,12 @@
           b.position.x += nx * overlap;
           b.position.z += nz * overlap;
 
-          // Exchange slight speed
           const avgSpeed = (a.speed + b.speed) * 0.5;
           a.speed = a.speed * 0.65 + avgSpeed * 0.35;
           b.speed = b.speed * 0.65 + avgSpeed * 0.35;
 
-          if (a.isPlayer || b.isPlayer) {
+          const activeCar = getActiveCar();
+          if ((a === activeCar || b === activeCar) && gameState === 'RACING') {
             window.soundEngine.playCollision();
           }
         }
@@ -357,82 +584,116 @@
     }
   }
 
-  // Smooth Chase Camera State
+  // Smooth Chase & TV Camera State
   const chaseCamPos = new THREE.Vector3();
   const chaseCamLook = new THREE.Vector3();
+  const tvCamLook = new THREE.Vector3();
   let chaseInitialized = false;
 
+  function findClosestTVStation(pos) {
+    let bestStation = tvCameraStations[0];
+    let minSq = Infinity;
+    for (let i = 0; i < tvCameraStations.length; i++) {
+      const st = tvCameraStations[i];
+      const sq = st.distanceToSquared(pos);
+      if (sq < minSq) {
+        minSq = sq;
+        bestStation = st;
+      }
+    }
+    return { station: bestStation, distance: Math.sqrt(minSq) };
+  }
+
   function updateCameras(dt, timeSec) {
+    const targetCar = getActiveCar();
+
     if (gameState === 'TITLE') {
-      // Cinematic orbit around the starting grid
-      const focus = playerCar.position;
-      const radius = 14;
-      const angle = timeSec * 0.35;
-      mainCamera.position.set(
-        focus.x + Math.sin(angle) * radius,
-        4.5 + Math.sin(timeSec * 0.7) * 1.2,
-        focus.z + Math.cos(angle) * radius
+      // Live background demo TV broadcast on Title Screen
+      const { station, distance } = findClosestTVStation(playerCar.position);
+      mainCamera.up.set(0, 1, 0);
+      mainCamera.position.copy(station);
+      tvCamLook.lerp(
+        new THREE.Vector3(playerCar.position.x, 0.9, playerCar.position.z),
+        Math.min(1, dt * 10)
       );
-      mainCamera.lookAt(focus.x, 1.0, focus.z - 6);
+      mainCamera.lookAt(tvCamLook);
+      mainCamera.fov = Math.max(32, Math.min(62, 72 - distance * 0.32));
+      mainCamera.updateProjectionMatrix();
       return;
     }
 
-    const forwardX = Math.sin(playerCar.heading);
-    const forwardZ = Math.cos(playerCar.heading);
-    const rightX = Math.cos(playerCar.heading);
-    const rightZ = -Math.sin(playerCar.heading);
+    const forwardX = Math.sin(targetCar.heading);
+    const forwardZ = Math.cos(targetCar.heading);
+    const rightX = Math.cos(targetCar.heading);
+    const rightZ = -Math.sin(targetCar.heading);
 
-    // High-speed & curb vibration shake
-    const speedRatio = Math.min(1, Math.abs(playerCar.speed) / playerCar.maxSpeed);
-    const shakeAmp = (speedRatio * 0.006) + (playerCar.curbIntensity * 0.028);
+    const speedRatio = Math.min(1, Math.abs(targetCar.speed) / targetCar.maxSpeed);
+    const shakeAmp = speedRatio * 0.006 + targetCar.curbIntensity * 0.026;
     const shakeX = (Math.random() - 0.5) * shakeAmp;
     const shakeY = (Math.random() - 0.5) * shakeAmp;
 
-    if (cameraMode === 'cockpit') {
-      // First-Person Driver Eye Position inside Cockpit
-      // Slightly behind the steering wheel (z = -0.32, y = 1.13 in car space)
+    const modeId = getCameraModeId();
+
+    if (modeId === 'cockpit') {
+      // 1. First-Person Driver Eye Position inside Cockpit
       const eyeLocalZ = -0.32;
       const eyeLocalY = 1.13;
 
-      const worldEyeX = playerCar.position.x + forwardX * eyeLocalZ + rightX * shakeX;
-      const worldEyeY = eyeLocalY + shakeY + playerCar.pitchAngle * 0.25;
-      const worldEyeZ = playerCar.position.z + forwardZ * eyeLocalZ;
+      const worldEyeX = targetCar.position.x + forwardX * eyeLocalZ + rightX * shakeX;
+      const worldEyeY = eyeLocalY + shakeY + targetCar.pitchAngle * 0.25;
+      const worldEyeZ = targetCar.position.z + forwardZ * eyeLocalZ;
 
       mainCamera.position.set(worldEyeX, worldEyeY, worldEyeZ);
 
-      // Look forward along car heading, turning slightly into corners
-      const cornerLookOffset = -playerCar.steerAngle * 2.2;
+      const cornerLookOffset = -targetCar.steerAngle * 2.2;
       const lookDist = 24;
-      const targetX = playerCar.position.x + forwardX * lookDist + rightX * cornerLookOffset;
-      const targetY = 0.85 - playerCar.pitchAngle * 8.0;
-      const targetZ = playerCar.position.z + forwardZ * lookDist + rightZ * cornerLookOffset;
+      const targetX = targetCar.position.x + forwardX * lookDist + rightX * cornerLookOffset;
+      const targetY = 0.85 - targetCar.pitchAngle * 8.0;
+      const targetZ = targetCar.position.z + forwardZ * lookDist + rightZ * cornerLookOffset;
 
       mainCamera.up.set(
-        Math.sin(playerCar.rollAngle * 0.65),
-        Math.cos(playerCar.rollAngle * 0.65),
+        Math.sin(targetCar.rollAngle * 0.65),
+        Math.cos(targetCar.rollAngle * 0.65),
         0
       );
       mainCamera.lookAt(targetX, targetY, targetZ);
 
-      // Dynamic FOV boost at high speed
       const targetFov = 66 + speedRatio * 12;
       mainCamera.fov += (targetFov - mainCamera.fov) * Math.min(1, dt * 8);
       mainCamera.updateProjectionMatrix();
-    } else {
-      // Third-Person Chase Camera
+    } else if (modeId === 'tv') {
+      // 2. Trackside TV Broadcast Camera with Auto-Zoom
+      mainCamera.up.set(0, 1, 0);
+      const { station, distance } = findClosestTVStation(targetCar.position);
+      mainCamera.position.copy(station);
+
+      const lookAhead = new THREE.Vector3(
+        targetCar.position.x + forwardX * 2.2,
+        0.95,
+        targetCar.position.z + forwardZ * 2.2
+      );
+      tvCamLook.lerp(lookAhead, Math.min(1, dt * 15));
+      mainCamera.lookAt(tvCamLook);
+
+      // Dynamic telephoto zoom as car approaches/leaves station
+      const targetFov = Math.max(26, Math.min(64, 70 - distance * 0.38));
+      mainCamera.fov += (targetFov - mainCamera.fov) * Math.min(1, dt * 6);
+      mainCamera.updateProjectionMatrix();
+    } else if (modeId === 'chase') {
+      // 3. Third-Person Chase Camera
       mainCamera.up.set(0, 1, 0);
       const distBack = 6.4;
       const heightUp = 2.65;
 
       const desiredPos = new THREE.Vector3(
-        playerCar.position.x - forwardX * distBack + rightX * shakeX * 2,
+        targetCar.position.x - forwardX * distBack + rightX * shakeX * 2,
         heightUp + shakeY * 2,
-        playerCar.position.z - forwardZ * distBack
+        targetCar.position.z - forwardZ * distBack
       );
       const desiredLook = new THREE.Vector3(
-        playerCar.position.x + forwardX * 6,
+        targetCar.position.x + forwardX * 6,
         1.0,
-        playerCar.position.z + forwardZ * 6
+        targetCar.position.z + forwardZ * 6
       );
 
       if (!chaseInitialized) {
@@ -450,19 +711,32 @@
       const targetFov = 64 + speedRatio * 10;
       mainCamera.fov += (targetFov - mainCamera.fov) * Math.min(1, dt * 8);
       mainCamera.updateProjectionMatrix();
+    } else if (modeId === 'orbit') {
+      // 4. Cinematic Dynamic Orbit Camera
+      mainCamera.up.set(0, 1, 0);
+      const orbitAngle = targetCar.heading + Math.sin(timeSec * 0.55) * 2.2 + 0.6;
+      const radius = 5.4;
+      mainCamera.position.set(
+        targetCar.position.x + Math.sin(orbitAngle) * radius,
+        1.45 + Math.sin(timeSec * 0.9) * 0.45,
+        targetCar.position.z + Math.cos(orbitAngle) * radius
+      );
+      mainCamera.lookAt(targetCar.position.x, 0.85, targetCar.position.z);
+      mainCamera.fov = 60;
+      mainCamera.updateProjectionMatrix();
     }
 
-    // Rear-View Mirror Camera (Mounted near rear of roof looking backward)
+    // Rear-View Mirror Camera (Mounted on the currently active car looking backward)
     const mirrorMountZ = -1.5;
     mirrorCamera.position.set(
-      playerCar.position.x + forwardX * mirrorMountZ,
+      targetCar.position.x + forwardX * mirrorMountZ,
       1.38,
-      playerCar.position.z + forwardZ * mirrorMountZ
+      targetCar.position.z + forwardZ * mirrorMountZ
     );
     mirrorCamera.lookAt(
-      playerCar.position.x - forwardX * 35,
+      targetCar.position.x - forwardX * 35,
       1.05,
-      playerCar.position.z - forwardZ * 35
+      targetCar.position.z - forwardZ * 35
     );
   }
 
@@ -518,36 +792,41 @@
     ctx.fillStyle = '#facc15';
     ctx.fillRect(toX(startPt.x) - 4, toY(startPt.z) - 4, 8, 8);
 
-    // Rival dots
-    aiCars.forEach((ai) => {
+    const activeCar = getActiveCar();
+
+    // Draw all cars
+    allCars.forEach((car) => {
+      if (car === activeCar) return;
       ctx.beginPath();
-      ctx.arc(toX(ai.position.x), toY(ai.position.z), 4, 0, Math.PI * 2);
-      ctx.fillStyle = '#' + ai.color.toString(16).padStart(6, '0');
+      ctx.arc(toX(car.position.x), toY(car.position.z), 4, 0, Math.PI * 2);
+      ctx.fillStyle = '#' + car.color.toString(16).padStart(6, '0');
       ctx.fill();
     });
 
-    // Player dot (larger with heading arrow)
-    const px = toX(playerCar.position.x);
-    const py = toY(playerCar.position.z);
+    // Active / Focused car dot (highlighted)
+    const px = toX(activeCar.position.x);
+    const py = toY(activeCar.position.z);
     ctx.beginPath();
-    ctx.arc(px, py, 5.5, 0, Math.PI * 2);
-    ctx.fillStyle = '#ff2a2a';
+    ctx.arc(px, py, 6, 0, Math.PI * 2);
+    ctx.fillStyle = '#' + activeCar.color.toString(16).padStart(6, '0');
     ctx.fill();
     ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 2.2;
     ctx.stroke();
   }
 
   function updateHUD() {
-    // Sort cars by totalProgress descending to compute live race rank
+    const activeCar = getActiveCar();
     const sorted = [...allCars].sort((a, b) => b.totalProgress - a.totalProgress);
-    const playerRank = sorted.indexOf(playerCar) + 1;
-    hudPos.textContent = String(playerRank);
+    const activeRank = sorted.indexOf(activeCar) + 1;
+    hudPos.textContent = String(activeRank);
 
-    const displayLap = Math.max(1, Math.min(TOTAL_LAPS, playerCar.lap));
+    const displayLap = isDemoMode
+      ? Math.max(1, activeCar.lap)
+      : Math.max(1, Math.min(TOTAL_LAPS, activeCar.lap));
     hudLap.textContent = String(displayLap);
 
-    // Check lap completion
+    // Check lap completion on playerCar (or activeCar in Demo Mode)
     const completedLaps = playerCar.lap - 1;
     if (completedLaps > recordedCompletedLaps && completedLaps > 0) {
       const lapDuration = totalRaceTime - currentLapStartTime;
@@ -560,26 +839,30 @@
         hudBestTime.textContent = formatTime(bestLapTime);
       }
 
-      if (completedLaps >= TOTAL_LAPS) {
+      if (!isDemoMode && completedLaps >= TOTAL_LAPS) {
+        const playerRank = sorted.indexOf(playerCar) + 1;
         finishRace(playerRank);
         return;
       } else {
         window.soundEngine.playLapSound();
-        showLapBanner(`LAP ${completedLaps + 1} / ${TOTAL_LAPS}`, formatTime(lapDuration));
+        const bannerLabel = isDemoMode
+          ? `DEMO LAP ${completedLaps + 1}`
+          : `LAP ${completedLaps + 1} / ${TOTAL_LAPS}`;
+        showLapBanner(bannerLabel, formatTime(lapDuration));
       }
     }
 
     const currentLapElapsed = totalRaceTime - currentLapStartTime;
     hudCurrentTime.textContent = formatTime(currentLapElapsed);
 
-    // Speed & RPM
-    const kmh = Math.abs(Math.round(playerCar.speed * 3.6));
+    // Speed & RPM of active car
+    const kmh = Math.abs(Math.round(activeCar.speed * 3.6));
     hudSpeed.textContent = String(kmh);
-    hudRpmBar.style.width = `${Math.round(playerCar.rpm * 100)}%`;
+    hudRpmBar.style.width = `${Math.round(activeCar.rpm * 100)}%`;
     hudGear.textContent =
-      playerCar.speed < -1 ? 'R' : Math.abs(playerCar.speed) < 0.5 ? 'N' : String(playerCar.gear);
+      activeCar.speed < -1 ? 'R' : Math.abs(activeCar.speed) < 0.5 ? 'N' : String(activeCar.gear);
 
-    if (playerCar.isOffTrack) {
+    if (activeCar.isOffTrack) {
       offroadWarning.classList.remove('hidden');
     } else {
       offroadWarning.classList.add('hidden');
@@ -606,14 +889,18 @@
     lastTime = now;
     const timeSec = now * 0.001;
 
-    if (gameState === 'COUNTDOWN') {
+    if (gameState === 'TITLE') {
+      // Background AI demo race while Title Screen is open
+      playerCar.updateAIPhysics(dt, track, allCars, true);
+      aiCars.forEach((ai) => ai.updateAIPhysics(dt, track, allCars, true));
+      resolveCarCollisions();
+    } else if (gameState === 'COUNTDOWN') {
       countdownTimer += dt;
-      const step = Math.floor(countdownTimer / 0.85); // 0, 1, 2, 3, 4 -> GO at 4
+      const step = Math.floor(countdownTimer / 0.85);
 
       if (step !== lastBeepStep) {
         lastBeepStep = step;
         if (step >= 0 && step < 3) {
-          // Light up lamps in pairs/sequence
           lamps[step].classList.add('red');
           if (step === 2) {
             lamps[3].classList.add('red');
@@ -629,6 +916,7 @@
           countdownText.textContent = 'GO!';
           window.soundEngine.playCountdownBeep(true);
           gameState = 'RACING';
+          updateDemoUI();
           setTimeout(() => {
             signalContainer.classList.add('hidden');
           }, 900);
@@ -641,23 +929,39 @@
     } else if (gameState === 'RACING') {
       totalRaceTime += dt;
 
-      playerCar.updatePlayerPhysics(dt, input, track, true);
+      if (isDemoMode) {
+        // AI drives playerCar as well!
+        playerCar.updateAIPhysics(dt, track, allCars, true);
+
+        // Auto-Camera Switcher in Demo Mode
+        if (autoCameraSwitch) {
+          autoCamTimer += dt;
+          if (autoCamTimer > 7.5) {
+            autoCamTimer = 0;
+            cycleCameraMode(false);
+          }
+        }
+      } else {
+        playerCar.updatePlayerPhysics(dt, input, track, true);
+      }
+
       aiCars.forEach((ai) => ai.updateAIPhysics(dt, track, allCars, true));
       resolveCarCollisions();
 
-      const speedRatio = Math.min(1, Math.abs(playerCar.speed) / playerCar.maxSpeed);
+      const activeCar = getActiveCar();
+      const speedRatio = Math.min(1, Math.abs(activeCar.speed) / activeCar.maxSpeed);
+      const isThrottle = isDemoMode ? activeCar.speed > 10 : input.up;
       window.soundEngine.update(
-        playerCar.rpm,
-        input.up,
-        playerCar.skidIntensity,
-        playerCar.curbIntensity,
+        activeCar.rpm,
+        isThrottle,
+        activeCar.skidIntensity,
+        activeCar.curbIntensity,
         speedRatio
       );
 
       updateHUD();
       drawMinimap();
     } else if (gameState === 'FINISHED') {
-      // Cooldown cruise after finishing
       playerCar.updateAIPhysics(dt, track, allCars, true);
       aiCars.forEach((ai) => ai.updateAIPhysics(dt, track, allCars, true));
       resolveCarCollisions();
@@ -674,10 +978,9 @@
     renderer.clear();
     renderer.render(scene, mainCamera);
 
-    // 2. Render Rear-View Mirror Viewport at Top Center (when in countdown/racing/finished)
+    // 2. Render Rear-View Mirror Viewport at Top Center
     if (gameState !== 'TITLE') {
       const rect = mirrorFrame.getBoundingClientRect();
-      // Convert DOM top-left coordinates to WebGL bottom-left coordinates
       const mLeft = Math.floor(rect.left);
       const mBottom = Math.floor(height - rect.bottom);
       const mWidth = Math.floor(rect.width);
