@@ -34,6 +34,19 @@ class SoundEngine {
     if (!AudioCtx) return;
 
     this.ctx = new AudioCtx();
+    if (this.ctx.state === 'suspended') {
+      this.ctx.resume();
+    }
+
+    // Unlock audio on iOS Safari with a 1-frame silent buffer
+    try {
+      const silentBuf = this.ctx.createBuffer(1, 1, 22050);
+      const src = this.ctx.createBufferSource();
+      src.buffer = silentBuf;
+      src.connect(this.ctx.destination);
+      src.start(0);
+    } catch (e) {}
+
     this.masterGain = this.ctx.createGain();
     this.masterGain.gain.value = this.muted ? 0 : 0.45;
     this.masterGain.connect(this.ctx.destination);

@@ -432,8 +432,9 @@ class RaceCar {
     const onCurb = trackInfo.distance >= halfRoad - 0.6 && trackInfo.distance <= halfRoad + track.curbWidth + 0.5;
     this.isOffTrack = trackInfo.distance > halfRoad + track.curbWidth;
 
-    // Target steering angle
-    const steerInput = (input.left ? 1 : 0) - (input.right ? 1 : 0);
+    // Target steering angle (supports digital buttons + analog touch/gyro steering)
+    const digitalSteer = (input.left ? 1 : 0) - (input.right ? 1 : 0);
+    const steerInput = Math.max(-1, Math.min(1, digitalSteer + (input.analogSteer || 0)));
     const speedRatio = Math.min(1, Math.abs(this.speed) / this.maxSpeed);
     const maxSteer = 0.68 - speedRatio * 0.34;
     const targetSteer = steerInput * maxSteer;

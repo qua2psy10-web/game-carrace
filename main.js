@@ -1,4 +1,4 @@
-// Main Game Controller: Scene, Cameras (1st/3rd Person + TV Broadcast + Orbit + Rear-View Mirror), Demo Mode & Race Loop
+// Main Game Controller: Scene, Cameras, Demo Mode, Multi-Touch (iPhone/iPad) & Gyro Controls
 (function () {
   const TOTAL_LAPS = 3;
 
@@ -39,6 +39,17 @@
   const autoCamStatus = document.getElementById('auto-cam-status');
   const btnTakeover = document.getElementById('btn-takeover');
 
+  // Touch Control Elements (iPhone / iPad)
+  const touchControls = document.getElementById('touch-controls');
+  const touchSteerPad = document.getElementById('touch-steer-pad');
+  const touchLeftBtn = document.getElementById('touch-left');
+  const touchRightBtn = document.getElementById('touch-right');
+  const touchAccelBtn = document.getElementById('touch-accel');
+  const touchBrakeBtn = document.getElementById('touch-brake');
+  const touchDriftBtn = document.getElementById('touch-drift');
+  const btnGyro = document.getElementById('btn-gyro');
+  const btnAutoAccel = document.getElementById('btn-auto-accel');
+
   const signalContainer = document.getElementById('signal-container');
   const countdownText = document.getElementById('countdown-text');
   const lamps = [
@@ -60,6 +71,24 @@
   const btnRetryRace = document.getElementById('btn-retry-race');
   const btnResultDemo = document.getElementById('btn-result-demo');
   const diffButtons = document.querySelectorAll('.diff-btn');
+
+  // Detect iPhone / iPad / Touch Device
+  let isTouchDevice =
+    'ontouchstart' in window ||
+    navigator.maxTouchPoints > 0 ||
+    window.matchMedia('(pointer: coarse)').matches;
+
+  window.addEventListener(
+    'touchstart',
+    () => {
+      if (!isTouchDevice) {
+        isTouchDevice = true;
+        updateTouchUI();
+      }
+      window.soundEngine.init();
+    },
+    { passive: true }
+  );
 
   // Renderer & Scene
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -160,10 +189,10 @@
 
   // Camera Modes List
   const CAMERA_MODES = [
-    { id: 'cockpit', label: 'コックピット (1人称)' },
-    { id: 'tv', label: 'TV中継カメラ' },
-    { id: 'chase', label: 'チェイス (3人称)' },
-    { id: 'orbit', label: 'シネマティック' }
+    { id: 'cockpit', label: '1人称' },
+    { id: 'tv', label: 'TV中継' },
+    { id: 'chase', label: '3人称' },
+    { id: 'orbit', label: 'シネマ' }
   ];
 
   // Game & Demo State
@@ -172,7 +201,7 @@
   let cameraModeIndex = 0; // 0: cockpit, 1: tv, 2: chase, 3: orbit
   let autoCameraSwitch = true;
   let autoCamTimer = 0;
-  let spectateCarIndex = 5; // Default to playerCar (index 5 in allCars)
+  let spectateCarIndex = 5;
   let difficulty = 'normal';
   let countdownTimer = 0;
   let lastBeepStep = -1;
@@ -184,14 +213,31 @@
   let lapTimes = [];
   let recordedCompletedLaps = 0;
 
-  // Input State
+  // Keyboard & Touch Input State
+  const keyInput = { up: false, down: false, left: false, right: false, space: false };
+  const touchInput = { up: false, down: false, left: false, right: false, space: false, analogSteer: 0 };
+  let autoAccelEnabled = false;
+  let gyroEnabled = false;
+  let gyroSteerValue = 0;
+
   const input = {
     up: false,
     down: false,
     left: false,
     right: false,
-    space: false
+    space: false,
+    analogSteer: 0
   };
+
+  function syncCombinedInput() {
+    const braking = keyInput.down || touchInput.down;
+    input.up = keyInput.up || touchInput.up || (autoAccelEnabled && !braking);
+    input.down = braking;
+    input.left = keyInput.left || touchInput.left;
+    input.right = keyInput.right || touchInput.right;
+    input.space = keyInput.space || touchInput.space;
+    input.analogSteer = gyroEnabled ? gyroSteerValue : touchInput.analogSteer;
+  }
 
   function getActiveCar() {
     return isDemoMode ? allCars[spectateCarIndex] : playerCar;
@@ -210,6 +256,13 @@
         car.updateDashboardCanvas();
       }
     });
+  }
+
+  function updateTouchUI() {
+    const showTouch =
+      isTouchDevice && !isDemoMode && (gameState === 'COUNTDOWN' || gameState === 'RACING');
+    touchControls.classList.toggle('hidden', !showTouch);
+    document.body.classList.toggle('touch-active', showTouch);
   }
 
   function updateCameraUI() {
@@ -234,15 +287,17 @@
     autoCamStatus.textContent = autoCameraSwitch ? 'ON' : 'OFF';
     btnAutoCam.classList.toggle('active', autoCameraSwitch);
     updateCameraUI();
+    updateTouchUI();
   }
 
+  // Keyboard Listeners
   window.addEventListener('keydown', (e) => {
     const code = e.code;
-    if (code === 'KeyW' || code === 'ArrowUp') input.up = true;
-    if (code === 'KeyS' || code === 'ArrowDown') input.down = true;
-    if (code === 'KeyA' || code === 'ArrowLeft') input.left = true;
-    if (code === 'KeyD' || code === 'ArrowRight') input.right = true;
-    if (code === 'Space') input.space = true;
+    if (code === 'KeyW' || code === 'ArrowUp') keyInput.up = true;
+    if (code === 'KeyS' || code === 'ArrowDown') keyInput.down = true;
+    if (code === 'KeyA' || code === 'ArrowLeft') keyInput.left = true;
+    if (code === 'KeyD' || code === 'ArrowRight') keyInput.right = true;
+    if (code === 'Space') keyInput.space = true;
 
     if (code === 'KeyV') {
       cycleCameraMode(true);
@@ -263,11 +318,142 @@
 
   window.addEventListener('keyup', (e) => {
     const code = e.code;
-    if (code === 'KeyW' || code === 'ArrowUp') input.up = false;
-    if (code === 'KeyS' || code === 'ArrowDown') input.down = false;
-    if (code === 'KeyA' || code === 'ArrowLeft') input.left = false;
-    if (code === 'KeyD' || code === 'ArrowRight') input.right = false;
-    if (code === 'Space') input.space = false;
+    if (code === 'KeyW' || code === 'ArrowUp') keyInput.up = false;
+    if (code === 'KeyS' || code === 'ArrowDown') keyInput.down = false;
+    if (code === 'KeyA' || code === 'ArrowLeft') keyInput.left = false;
+    if (code === 'KeyD' || code === 'ArrowRight') keyInput.right = false;
+    if (code === 'Space') keyInput.space = false;
+  });
+
+  // Setup Multi-Touch Controls for iPhone / iPad
+  function bindPedalTouch(elem, propName) {
+    const onPress = (e) => {
+      if (e.cancelable) e.preventDefault();
+      window.soundEngine.init();
+      touchInput[propName] = true;
+      elem.classList.add('pressed');
+    };
+    const onRelease = (e) => {
+      if (e && e.cancelable) e.preventDefault();
+      touchInput[propName] = false;
+      elem.classList.remove('pressed');
+    };
+
+    elem.addEventListener('touchstart', onPress, { passive: false });
+    elem.addEventListener('touchend', onRelease, { passive: false });
+    elem.addEventListener('touchcancel', onRelease, { passive: false });
+    elem.addEventListener('mousedown', onPress);
+    elem.addEventListener('mouseup', onRelease);
+    elem.addEventListener('mouseleave', onRelease);
+  }
+
+  bindPedalTouch(touchAccelBtn, 'up');
+  bindPedalTouch(touchBrakeBtn, 'down');
+  bindPedalTouch(touchDriftBtn, 'space');
+
+  // Steering Pad: supports both tapping Left/Right buttons and sliding thumb smoothly across pad
+  function handleSteerTouch(e) {
+    if (e.cancelable) e.preventDefault();
+    const rect = touchSteerPad.getBoundingClientRect();
+    let activeTouch = null;
+
+    if (e.touches) {
+      for (let i = 0; i < e.touches.length; i++) {
+        const t = e.touches[i];
+        // Check if touch is on the left half of screen / near steer pad
+        if (t.clientX < window.innerWidth * 0.5) {
+          activeTouch = t;
+          break;
+        }
+      }
+    }
+
+    if (!activeTouch) {
+      touchInput.left = false;
+      touchInput.right = false;
+      touchInput.analogSteer = 0;
+      touchLeftBtn.classList.remove('pressed');
+      touchRightBtn.classList.remove('pressed');
+      return;
+    }
+
+    const centerX = rect.left + rect.width * 0.5;
+    const offset = (activeTouch.clientX - centerX) / (rect.width * 0.42);
+    // Negative offset = left (positive steerAngle in car.js), Positive offset = right
+    if (offset < -0.1) {
+      touchInput.left = true;
+      touchInput.right = false;
+      touchLeftBtn.classList.add('pressed');
+      touchRightBtn.classList.remove('pressed');
+    } else if (offset > 0.1) {
+      touchInput.left = false;
+      touchInput.right = true;
+      touchLeftBtn.classList.remove('pressed');
+      touchRightBtn.classList.add('pressed');
+    } else {
+      touchInput.left = false;
+      touchInput.right = false;
+      touchLeftBtn.classList.remove('pressed');
+      touchRightBtn.classList.remove('pressed');
+    }
+  }
+
+  touchSteerPad.addEventListener('touchstart', handleSteerTouch, { passive: false });
+  touchSteerPad.addEventListener('touchmove', handleSteerTouch, { passive: false });
+  touchSteerPad.addEventListener('touchend', handleSteerTouch, { passive: false });
+  touchSteerPad.addEventListener('touchcancel', handleSteerTouch, { passive: false });
+
+  // Gyroscope / DeviceOrientation Tilt Steering for iPhone & iPad
+  function handleDeviceOrientation(e) {
+    if (!gyroEnabled) return;
+    // Determine screen orientation angle to pick correct tilt axis
+    const orient =
+      (window.screen && window.screen.orientation && window.screen.orientation.angle) ||
+      window.orientation ||
+      0;
+
+    let tiltDeg = 0;
+    if (orient === 90) {
+      tiltDeg = e.beta || 0;
+    } else if (orient === -90 || orient === 270) {
+      tiltDeg = -(e.beta || 0);
+    } else {
+      tiltDeg = e.gamma || 0;
+    }
+
+    // Clamp to +/- 32 degrees and map to [-1, 1] (left tilt = positive steer)
+    const normalized = Math.max(-1, Math.min(1, -tiltDeg / 28));
+    gyroSteerValue = Math.abs(normalized) < 0.06 ? 0 : normalized;
+  }
+
+  btnGyro.addEventListener('click', async () => {
+    if (!gyroEnabled) {
+      if (
+        typeof DeviceOrientationEvent !== 'undefined' &&
+        typeof DeviceOrientationEvent.requestPermission === 'function'
+      ) {
+        try {
+          const perm = await DeviceOrientationEvent.requestPermission();
+          if (perm !== 'granted') return;
+        } catch (err) {
+          return;
+        }
+      }
+      window.addEventListener('deviceorientation', handleDeviceOrientation);
+      gyroEnabled = true;
+    } else {
+      gyroEnabled = false;
+      gyroSteerValue = 0;
+    }
+    btnGyro.textContent = gyroEnabled ? '📱 傾き操作: ON' : '📱 傾き操作: OFF';
+    btnGyro.classList.toggle('active', gyroEnabled);
+  });
+
+  btnAutoAccel.addEventListener('click', () => {
+    autoAccelEnabled = !autoAccelEnabled;
+    btnAutoAccel.textContent = autoAccelEnabled ? '⚡ 自動アクセル: ON' : '⚡ 自動アクセル: OFF';
+    btnAutoAccel.classList.toggle('active', autoAccelEnabled);
+    touchAccelBtn.classList.toggle('pressed', autoAccelEnabled);
   });
 
   // UI Event Listeners
@@ -311,7 +497,7 @@
 
   btnTakeover.addEventListener('click', () => {
     if (isDemoMode) {
-      toggleDemoMode(); // Switches to manual control of playerCar
+      toggleDemoMode();
     }
     btnTakeover.blur();
   });
@@ -374,7 +560,6 @@
   function toggleDemoMode() {
     isDemoMode = !isDemoMode;
     if (!isDemoMode) {
-      // Returning to manual control: focus playerCar and use Cockpit or Chase view
       spectateCarIndex = 5;
       if (cameraModeIndex > 2) cameraModeIndex = 0;
     } else {
@@ -386,20 +571,20 @@
   function toggleMute() {
     window.soundEngine.init();
     const muted = window.soundEngine.toggleMute();
-    btnSound.textContent = muted ? '🔇 音: OFF [M]' : '🔊 音: ON [M]';
+    btnSound.textContent = muted ? '🔇 音: OFF' : '🔊 音: ON';
   }
 
   function formatTime(sec) {
-    if (!isFinite(sec) || sec < 0) return '--:--.---';
+    if (!isFinite(sec) || sec < 0) return '--:--.--';
     const mins = Math.floor(sec / 60);
     const secs = Math.floor(sec % 60);
-    const ms = Math.floor((sec % 1) * 1000);
+    const cs = Math.floor((sec % 1) * 100);
     return (
       String(mins).padStart(2, '0') +
       ':' +
       String(secs).padStart(2, '0') +
       '.' +
-      String(ms).padStart(3, '0')
+      String(cs).padStart(2, '0')
     );
   }
 
@@ -426,7 +611,7 @@
         const baseCfg = rivalConfigs[idx];
         car.aiSkill = baseCfg.baseSkill * diffMult;
       } else {
-        car.aiSkill = 1.02; // Fast and clean line when in Demo Mode
+        car.aiSkill = 1.02;
       }
 
       car._syncVisuals(0.016, 0);
@@ -446,6 +631,7 @@
     hudBottomRight.classList.add('hud-hidden');
     demoControlBar.classList.add('hidden');
     startScreen.classList.remove('hidden');
+    updateTouchUI();
     syncCarCockpitVisibility();
   }
 
@@ -453,7 +639,7 @@
     isDemoMode = false;
     spectateCarIndex = 5;
     if (cameraModeIndex === 1 || cameraModeIndex === 3) {
-      cameraModeIndex = 0; // Start in 1st-person cockpit by default
+      cameraModeIndex = 0;
     }
 
     startScreen.classList.add('hidden');
@@ -463,7 +649,6 @@
     hudBottomRight.classList.remove('hud-hidden');
 
     resetCarsToGrid();
-    updateDemoUI();
 
     gameState = 'COUNTDOWN';
     countdownTimer = 0;
@@ -474,8 +659,8 @@
     lapTimes = [];
     recordedCompletedLaps = 0;
 
-    hudBestTime.textContent = '--:--.---';
-    hudCurrentTime.textContent = '00:00.000';
+    hudBestTime.textContent = '--:--.--';
+    hudCurrentTime.textContent = '00:00.00';
     hudLap.textContent = '1';
 
     lamps.forEach((l) => {
@@ -483,12 +668,13 @@
     });
     countdownText.textContent = 'READY';
     signalContainer.classList.remove('hidden');
+    updateDemoUI();
   }
 
   function startDemoRun() {
     isDemoMode = true;
-    spectateCarIndex = 5; // Start watching player's red car
-    cameraModeIndex = 0;  // Start in 1st-person cockpit view
+    spectateCarIndex = 5;
+    cameraModeIndex = 0;
     autoCamTimer = 0;
 
     startScreen.classList.add('hidden');
@@ -499,7 +685,6 @@
     hudBottomRight.classList.remove('hud-hidden');
 
     resetCarsToGrid();
-    // Give cars a rolling start in Demo Mode so action begins immediately!
     allCars.forEach((car, idx) => {
       car.speed = 32 + idx * 1.5;
     });
@@ -511,8 +696,8 @@
     lapTimes = [];
     recordedCompletedLaps = 0;
 
-    hudBestTime.textContent = '--:--.---';
-    hudCurrentTime.textContent = '00:00.000';
+    hudBestTime.textContent = '--:--.--';
+    hudCurrentTime.textContent = '00:00.00';
     hudLap.textContent = '1';
 
     updateDemoUI();
@@ -533,6 +718,7 @@
     window.soundEngine.playFinishFanfare();
     window.soundEngine.stopContinuous();
     demoControlBar.classList.add('hidden');
+    updateTouchUI();
 
     const suffixes = ['st', 'nd', 'rd', 'th', 'th', 'th'];
     const rankStr = `${rank}${suffixes[rank - 1] || 'th'} PLACE ${rank === 1 ? '🏆' : ''}`;
@@ -608,7 +794,6 @@
     const targetCar = getActiveCar();
 
     if (gameState === 'TITLE') {
-      // Live background demo TV broadcast on Title Screen
       const { station, distance } = findClosestTVStation(playerCar.position);
       mainCamera.up.set(0, 1, 0);
       mainCamera.position.copy(station);
@@ -635,7 +820,6 @@
     const modeId = getCameraModeId();
 
     if (modeId === 'cockpit') {
-      // 1. First-Person Driver Eye Position inside Cockpit
       const eyeLocalZ = -0.32;
       const eyeLocalY = 1.13;
 
@@ -662,7 +846,6 @@
       mainCamera.fov += (targetFov - mainCamera.fov) * Math.min(1, dt * 8);
       mainCamera.updateProjectionMatrix();
     } else if (modeId === 'tv') {
-      // 2. Trackside TV Broadcast Camera with Auto-Zoom
       mainCamera.up.set(0, 1, 0);
       const { station, distance } = findClosestTVStation(targetCar.position);
       mainCamera.position.copy(station);
@@ -675,12 +858,10 @@
       tvCamLook.lerp(lookAhead, Math.min(1, dt * 15));
       mainCamera.lookAt(tvCamLook);
 
-      // Dynamic telephoto zoom as car approaches/leaves station
       const targetFov = Math.max(26, Math.min(64, 70 - distance * 0.38));
       mainCamera.fov += (targetFov - mainCamera.fov) * Math.min(1, dt * 6);
       mainCamera.updateProjectionMatrix();
     } else if (modeId === 'chase') {
-      // 3. Third-Person Chase Camera
       mainCamera.up.set(0, 1, 0);
       const distBack = 6.4;
       const heightUp = 2.65;
@@ -712,7 +893,6 @@
       mainCamera.fov += (targetFov - mainCamera.fov) * Math.min(1, dt * 8);
       mainCamera.updateProjectionMatrix();
     } else if (modeId === 'orbit') {
-      // 4. Cinematic Dynamic Orbit Camera
       mainCamera.up.set(0, 1, 0);
       const orbitAngle = targetCar.heading + Math.sin(timeSec * 0.55) * 2.2 + 0.6;
       const radius = 5.4;
@@ -726,7 +906,7 @@
       mainCamera.updateProjectionMatrix();
     }
 
-    // Rear-View Mirror Camera (Mounted on the currently active car looking backward)
+    // Rear-View Mirror Camera
     const mirrorMountZ = -1.5;
     mirrorCamera.position.set(
       targetCar.position.x + forwardX * mirrorMountZ,
@@ -770,7 +950,6 @@
     const toX = (x) => (x - minX) * scale;
     const toY = (z) => (z - minZ) * scale;
 
-    // Track outline
     ctx.beginPath();
     track.trackPoints.forEach((p, idx) => {
       const mx = toX(p.x);
@@ -787,14 +966,12 @@
     ctx.lineWidth = 2.5;
     ctx.stroke();
 
-    // Start/Finish marker
     const startPt = track.trackPoints[0];
     ctx.fillStyle = '#facc15';
     ctx.fillRect(toX(startPt.x) - 4, toY(startPt.z) - 4, 8, 8);
 
     const activeCar = getActiveCar();
 
-    // Draw all cars
     allCars.forEach((car) => {
       if (car === activeCar) return;
       ctx.beginPath();
@@ -803,7 +980,6 @@
       ctx.fill();
     });
 
-    // Active / Focused car dot (highlighted)
     const px = toX(activeCar.position.x);
     const py = toY(activeCar.position.z);
     ctx.beginPath();
@@ -826,7 +1002,6 @@
       : Math.max(1, Math.min(TOTAL_LAPS, activeCar.lap));
     hudLap.textContent = String(displayLap);
 
-    // Check lap completion on playerCar (or activeCar in Demo Mode)
     const completedLaps = playerCar.lap - 1;
     if (completedLaps > recordedCompletedLaps && completedLaps > 0) {
       const lapDuration = totalRaceTime - currentLapStartTime;
@@ -855,7 +1030,6 @@
     const currentLapElapsed = totalRaceTime - currentLapStartTime;
     hudCurrentTime.textContent = formatTime(currentLapElapsed);
 
-    // Speed & RPM of active car
     const kmh = Math.abs(Math.round(activeCar.speed * 3.6));
     hudSpeed.textContent = String(kmh);
     hudRpmBar.style.width = `${Math.round(activeCar.rpm * 100)}%`;
@@ -869,17 +1043,14 @@
     }
   }
 
-  // Initialize Grid Positions for Title Screen Preview
   resetCarsToGrid();
 
-  // Handle Window Resize
   window.addEventListener('resize', () => {
     renderer.setSize(window.innerWidth, window.innerHeight);
     mainCamera.aspect = window.innerWidth / window.innerHeight;
     mainCamera.updateProjectionMatrix();
   });
 
-  // Main Animation Loop
   let lastTime = performance.now();
 
   function animate(now) {
@@ -889,8 +1060,9 @@
     lastTime = now;
     const timeSec = now * 0.001;
 
+    syncCombinedInput();
+
     if (gameState === 'TITLE') {
-      // Background AI demo race while Title Screen is open
       playerCar.updateAIPhysics(dt, track, allCars, true);
       aiCars.forEach((ai) => ai.updateAIPhysics(dt, track, allCars, true));
       resolveCarCollisions();
@@ -930,10 +1102,8 @@
       totalRaceTime += dt;
 
       if (isDemoMode) {
-        // AI drives playerCar as well!
         playerCar.updateAIPhysics(dt, track, allCars, true);
 
-        // Auto-Camera Switcher in Demo Mode
         if (autoCameraSwitch) {
           autoCamTimer += dt;
           if (autoCamTimer > 7.5) {
